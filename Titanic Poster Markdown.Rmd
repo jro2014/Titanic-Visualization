@@ -1,0 +1,191 @@
+---
+title: "Titanic Poster"
+author: "Jack R. O'Connor"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(corrplot)
+library(ggplot2)
+library(tibble)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(moonBook)
+library(ggiraphExtra)
+```
+
+Loading the training data
+```{r}
+titanic <- read.csv("C:\\Users\\JRO20\\OneDrive\\Desktop\\Data\\train.csv", header = TRUE, stringsAsFactors = FALSE, na.strings = c("", ".", "NA"))
+
+str(titanic)
+titanic$Survived <- factor(titanic$Survived)
+```
+
+How many Null values we lookin at?
+```{r}
+apply(titanic, 2, function(x){sum(is.na(x))})
+```
+
+Sex barcharts lol
+```{r}
+ggplot(titanic, aes(x=Sex, fill = Sex)) +
+  geom_bar()
+
+ggplot(titanic, aes(x = Sex, fill = Survived))+
+  geom_bar(position = "dodge")+
+  facet_wrap(~Pclass) +
+  ggtitle("Survival Rates between Male and Female Across Class")
+```
+
+
+Boxplot of ages
+```{r Boxplot of Ages}
+ggplot(titanic, aes(Sex, Age, fill = Sex)) +
+  geom_boxplot()
+```
+
+
+
+Correlation Matrix
+```{r Correlation Matrix}
+cor.data <- titanic[, -4]
+cor.data$Sex <- ifelse(titanic$Sex == "female", 0, 1) #0 for F 1 for M 
+cor.data <- cor.data[ , -10] #remove cabin since *mostly* unique values
+cor.data$Embarked <- ifelse(titanic$Embarked == "C", 1, ifelse(titanic$Embarked == "Q", 2, 3)) #C==1, Q==2, S==3
+cor.data <- cor.data[ , -8] #Remove ticket number 
+cor.data$Survived <- as.numeric(as.character(cor.data$Survived)) #unfactor survived 
+cor.data <- cor.data[,-10]
+str(cor.data)
+
+titanic.cor <- cor(na.omit(cor.data[, -1])) ##taking absolute value of the correlation because 
+
+corrplot(titanic.cor)
+
+```
+
+
+Looking at the names. Specifically the titles
+```{r Title Analysis}
+#Mr. Mrs. Miss. Master. Don. Anything after a comma but before a period 
+
+titanic$Name[514] <- "Rothschild, Mrs. Martin (Elizabeth L Barrett)" #removing period after middle initial 
+
+titanic$Title <- gsub("(.*),\\s(.*)\\.(.*)", "\\2", titanic$Name) #pulling out titles into their own column
+titanic$Title[760] <- "Countess" #was "the Countess" manually overrode this since only one 
+
+table(titanic$Title)
+
+#Cleaning up titles. Grouping unusual titles as "Rare" 
+titanic$Title[titanic$Title == "Ms"] <- "Miss"
+titanic$Title[titanic$Title == "Mlle"] <- "Miss"
+titanic$Title[titanic$Title == "Mme"] <- "Mrs"
+titanic$Title[titanic$Title == "Don" | titanic$Title == "Dr" | titanic$Title == "Capt" | 
+                titanic$Title == "Col" | titanic$Title == "Countess" | 
+                titanic$Title == "Lady" | titanic$Title == "Major" | 
+                titanic$Title == "Jonkheer" | titanic$Title == "Rev" | 
+                titanic$Title == "Sir"] <- "Rare"
+
+table(titanic$Title)
+
+
+```
+
+```{r Cleaning Missing Ages}
+ageless <- which(is.na(titanic$Age))
+mean.age <- as.data.frame(tapply(titanic$Age[-ageless], titanic$Title[-ageless], mean))
+colnames(mean.age) <- c("Age")
+
+ggplot(mean.age) +
+  geom_step(aes(x = rownames(mean.age), y = Age, group = 1)) +
+  ylim(c(0,50)) + 
+  xlab("Title") +
+  ylab("Average Age") +
+  ggtitle("Average Age of Each Title", subtitle = "'Rare' titles include military, clergy, and nobility titles")
+
+
+#Function for replacing missing ages with means of that title
+clean.age <- function(title) 
+{
+  s <- titanic[titanic$Title == title,]
+  m <- round(mean(s$Age, na.rm = TRUE))
+  ifelse(is.na(s$Age), m, s$Age)
+}
+#Replacing all NAs in age
+titanic$Age[titanic$Title == "Master"] <- clean.age("Master")
+titanic$Age[titanic$Title == "Miss"] <- clean.age("Miss")
+titanic$Age[titanic$Title == "Mr"] <- clean.age("Mr")
+titanic$Age[titanic$Title == "Mrs"] <- clean.age("Mrs")
+titanic$Age[titanic$Title == "Rare"] <- clean.age("Rare")
+
+```
+
+
+
+Logistic regression. We will exclude passenger ID (no relevance to the data just an index), Name (almost all unique), Ticket(reflected in class and only gives insight into family groups), Cabin(too many missing and also reflected in class), and Title (reflected in age and sex)
+```{r Logistic Regression}
+logit <- titanic[-which(is.na(titanic$Embarked)), ]
+logit <- logit[,-c(1,4,9,11,13)]
+logit$Pclass <- factor(logit$Pclass)
+logit$Survived <- as.numeric(as.character(logit$Survived))
+
+logistic.reg <- glm(Survived ~ Sex + Pclass + Age, family = binomial(link = "logit"), data = logit)
+summary(logistic.reg)
+ggPredict(logistic.reg, interactive = FALSE, jitter = TRUE)
+
+```
+
+
+
+
+Decision Tree Model
+```{r}
+#tree.disp <- rpart(Author ~ ., data = train.disp, method = "class", control = rpart.control(cp = 0, minsplit = 2, maxdepth = 8))
+
+tree.dat <- titanic[-which(is.na(titanic$Embarked)), ]
+tree.dat <- tree.dat[, -c(1,4,9, 11,13)]
+
+
+tree.1 <- rpart(Survived ~., data = tree.dat, method = "class", 
+                control = rpart.control(cp=0.0058824, minsplit = 2, 
+                                        maxdepth = 6)) #Post pruned to cp = .0058824 
+
+summary(tree.1)
+rsq.rpart(tree.1)
+plotcp(tree.1)
+fancyRpartPlot(tree.1)
+prp(tree.1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
